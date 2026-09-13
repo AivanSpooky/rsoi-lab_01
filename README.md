@@ -59,3 +59,92 @@
 3. ❗️С конца
    ноября [Heroku убирает Free Plan](https://help.heroku.com/RSBRUH58/removal-of-heroku-free-product-plans-faq),
    останутся только платные подписки. В связи с этим, дедлайн по сдаче ЛР #1 10 ноября. 
+
+---
+
+# Реализация
+
+> Heroku заменён на **Render** (см. [DEPLOY.md](DEPLOY.md)).
+
+## Стек
+
+* .NET 10 / ASP.NET Core Web API (C#)
+* Entity Framework Core 10 + Npgsql, схема накатывается миграциями при старте
+* PostgreSQL 13
+* xUnit + FluentAssertions — 11 unit-тестов
+* Docker (multi-stage build) + GitHub Actions + Render
+
+## Структура
+
+```
+src/PersonService/
+  Controllers/PersonController.cs      REST-слой, маршруты /api/v1/persons
+  Services/                            IPersonService + PersonServiceImpl (бизнес-логика)
+  Data/PersonDbContext.cs              EF Core, таблица persons
+  Data/Migrations/                     миграции EF Core
+  Domain/Person.cs                     сущность
+  Dto/                                 PersonRequest/PersonResponse/Error/ValidationError
+  Infrastructure/                      обработчики исключений, разбор DATABASE_URL
+  Program.cs                           композиция приложения
+tests/PersonService.Tests/             unit-тесты
+.github/workflows/classroom.yml        CI/CD pipeline
+.github/scripts/                       скрипты деплоя и ожидания сервиса
+```
+
+## API
+
+| Метод    | Путь                    | Ответ                                                        |
+|----------|-------------------------|--------------------------------------------------------------|
+| `GET`    | `/api/v1/persons`       | `200` — массив `PersonResponse`                               |
+| `GET`    | `/api/v1/persons/{id}`  | `200` — `PersonResponse`, `404` — `ErrorResponse`             |
+| `POST`   | `/api/v1/persons`       | `201` с `Location: /api/v1/persons/{id}` и пустым телом, `400` — `ValidationErrorResponse` |
+| `PATCH`  | `/api/v1/persons/{id}`  | `200` — обновлённый `PersonResponse`, `400`, `404`            |
+| `DELETE` | `/api/v1/persons/{id}`  | `204`, `404`                                                  |
+| `GET`    | `/manage/health`        | `200` — `{"status":"UP"}` (health check для Render)           |
+
+`PATCH` — частичное обновление: поля, отсутствующие в теле запроса, остаются прежними.
+
+Swagger UI доступен по адресу `/swagger`.
+
+## Локальный запуск
+
+Полный стек (Postgres + приложение) в Docker:
+
+```bash
+docker compose up -d --build
+curl http://localhost:8080/manage/health
+```
+
+Только БД, приложение — из исходников:
+
+```bash
+docker compose up -d postgres
+dotnet run --project src/PersonService
+```
+
+Строка подключения берётся из `DATABASE_URL` (формат `postgresql://user:pass@host:port/db`),
+а если её нет — из `ConnectionStrings:PersonsDb` в `appsettings.json`.
+
+## Тесты
+
+```bash
+dotnet test                                                     # unit-тесты
+
+npx newman run "postman/[inst] Lab1.postman_collection.json" \
+  -e "postman/[inst][local] Lab1.postman_environment.json"      # интеграционные
+```
+
+## CI/CD
+
+[`.github/workflows/classroom.yml`](.github/workflows/classroom.yml) на каждый push в `master`:
+
+1. `dotnet restore` / `build` / `test` (результаты тестов — в артефактах сборки);
+2. собирает Docker-образ (`docker/build-push-action`, кеш в GitHub Actions cache);
+3. поднимает `docker compose` с этим образом и гоняет newman против `localhost:8080` —
+   smoke-тест до выкатки;
+4. пушит образ в `ghcr.io`;
+5. триггерит деплой на Render через REST API и ждёт статус `live`;
+6. дожидается пробуждения сервиса и запускает newman против боевого адреса;
+7. отправляет отметку автогрейдеру.
+
+Настройка секретов и сервисов — в [DEPLOY.md](DEPLOY.md).

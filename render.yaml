@@ -1,0 +1,23 @@
+# Render Blueprint: https://render.com/docs/infrastructure-as-code
+# Creates the Postgres instance and an image-backed web service in one step.
+# The image is built and pushed by GitHub Actions; new versions are rolled out
+# through the Render REST API (see .github/scripts/deploy-render.sh).
+databases:
+  - name: persons-db
+    databaseName: persons
+    user: program
+    plan: free
+
+services:
+  - type: web
+    name: person-service
+    runtime: image
+    plan: free
+    image:
+      url: ghcr.io/aivanspooky/rsoi-lab_01:latest
+    healthCheckPath: /manage/health
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: persons-db
+          property: connectionString
