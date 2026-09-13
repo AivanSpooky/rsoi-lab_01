@@ -166,7 +166,22 @@ jobs:
         uses: education/autograding@v1
         continue-on-error: true
 
+      # The action JSON.parse()s google_token, so a missing or non-JSON secret
+      # crashes it instead of just skipping the mark.
+      - name: Check whether the autograder marker is configured
+        id: grader-config
+        env:
+          GOOGLE_TOKEN: ${{ secrets.GOOGLE_API_KEY }}
+        run: |
+          if [[ -n "${GOOGLE_TOKEN}" ]] && jq empty <<< "${GOOGLE_TOKEN}" 2>/dev/null; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::GOOGLE_API_KEY is missing or is not a Google service account JSON, skipping the grader mark"
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Github auto grader mark
+        if: steps.grader-config.outputs.configured == 'true'
         uses: Romanow/google-sheet-autograder-marker@v1.0
         with:
           google_token: ${{secrets.GOOGLE_API_KEY}}
